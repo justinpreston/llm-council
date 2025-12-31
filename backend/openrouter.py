@@ -59,6 +59,17 @@ async def query_model(
 
     except Exception as e:
         print(f"Error querying model {model}: {e}")
+        return None
+
+
+async def query_models_parallel(
+    models: List[str],
+    messages: List[Dict[str, str]]
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    """
+    Query multiple models in parallel.
+
+    Args:
         models: List of OpenRouter model identifiers
         messages: List of message dicts to send to each model
 
