@@ -14,6 +14,20 @@ function deAnonymizeText(text, labelToModel) {
   return result;
 }
 
+function TokenUsage({ usage }) {
+  if (!usage || !usage.total_tokens) return null;
+  
+  return (
+    <div className="token-usage">
+      <span className="token-label">Tokens:</span>
+      <span className="token-value">{usage.prompt_tokens?.toLocaleString() || 0} in</span>
+      <span className="token-separator">→</span>
+      <span className="token-value">{usage.completion_tokens?.toLocaleString() || 0} out</span>
+      <span className="token-total">({usage.total_tokens?.toLocaleString() || 0} total)</span>
+    </div>
+  );
+}
+
 export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
   const [activeTab, setActiveTab] = useState(0);
 
@@ -21,9 +35,19 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
     return null;
   }
 
+  // Calculate totals
+  const totalTokens = rankings.reduce((sum, r) => sum + (r.usage?.total_tokens || 0), 0);
+
   return (
     <div className="stage stage2">
-      <h3 className="stage-title">Stage 2: Peer Rankings</h3>
+      <div className="stage-header">
+        <h3 className="stage-title">Stage 2: Peer Rankings</h3>
+        {totalTokens > 0 && (
+          <div className="stage-tokens">
+            Total: {totalTokens.toLocaleString()} tokens
+          </div>
+        )}
+      </div>
 
       <h4>Raw Evaluations</h4>
       <p className="stage-description">
@@ -44,8 +68,11 @@ export default function Stage2({ rankings, labelToModel, aggregateRankings }) {
       </div>
 
       <div className="tab-content">
-        <div className="ranking-model">
-          {rankings[activeTab].model}
+        <div className="model-header">
+          <div className="ranking-model">
+            {rankings[activeTab].model}
+          </div>
+          <TokenUsage usage={rankings[activeTab].usage} />
         </div>
         <div className="ranking-content markdown-content">
           <ReactMarkdown>
