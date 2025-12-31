@@ -7,10 +7,66 @@ from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 # Maximum number of previous exchanges to include in context
 MAX_HISTORY_EXCHANGES = 5
 
+# Threshold for triggering summarization (number of exchanges)
+SUMMARIZATION_THRESHOLD = 8
+
+# Number of recent exchanges to keep verbatim (not summarized)
+RECENT_EXCHANGES_TO_KEEP = 3
+
+
+async def summarize_conversation(messages: List[Dict[str, Any]]) -> str:
+    """
+    Generate a concise summary of conversation messages.
+    
+    Args:
+        messages: List of conversation messages to summarize
+        
+    Returns:
+        A concise summary string
+    """
+    if not messages:
+        return ""
+    
+    # Format messages for summarization
+    conversation_text = []
+    for msg in messages:
+        if msg.get("role") == "user":
+            conversation_text.append(f"User: {msg.get('content', '')}")
+        elif msg.get("role") == "assistant":
+            stage3 = msg.get("stage3", {})
+            response = stage3.get("response", "")
+            if response:
+                # Truncate for summarization input
+                if len(response) > 500:
+                    response = response[:500] + "..."
+                conversation_text.append(f"Council: {response}")
+    
+    if not conversation_text:
+        return ""
+    
+    summary_prompt = f"""Summarize the following conversation in 2-3 concise sentences. 
+Focus on the main topics discussed and any important conclusions or decisions.
+
+Conversation:
+{chr(10).join(conversation_text)}
+
+Summary:"""
+
+    messages_for_api = [{"role": "user", "content": summary_prompt}]
+    
+    # Use a fast model for summarization
+    response = await query_model("google/gemini-2.5-flash", messages_for_api, timeout=30.0)
+    
+    if response is None:
+        # Fallback: create a simple topic list
+        return "Previous discussion covered multiple topics."
+    
+    return response.get('content', '').strip()
+
 
 def format_conversation_history(messages: List[Dict[str, Any]], max_exchanges: int = MAX_HISTORY_EXCHANGES) -> str:
     """
-    Format conversation history for inclusion in prompts.
+    Format conversation history for inclusion in prompts (sync version).
     
     Args:
         messages: List of conversation messages (user and assistant)
@@ -49,6 +105,68 @@ def format_conversation_history(messages: List[Dict[str, Any]], max_exchanges: i
     return "[Previous conversation]\n" + "\n\n".join(history_parts) + "\n\n[Current question]\n"
 
 
+async def format_conversation_history_with_summary(
+    messages: List[Dict[str, Any]],
+    max_exchanges: int = MAX_HISTORY_EXCHANGES
+) -> str:
+    """
+    Format conversation history with auto-summarization for long conversations.
+    
+    For conversations exceeding SUMMARIZATION_THRESHOLD exchanges:
+    - Summarizes older messages into a brief context
+    - Keeps recent exchanges verbatim
+    
+    Args:
+        messages: List of conversation messages (user and assistant)
+        max_exchanges: Maximum number of recent exchanges to include verbatim
+        
+    Returns:
+        Formatted history string with optional summary prefix
+    """
+    if not messages:
+        return ""
+    
+    # Count exchanges (each user+assistant pair = 1 exchange)
+    num_exchanges = len(messages) // 2
+    
+    # If under threshold, use simple formatting
+    if num_exchanges <= SUMMARIZATION_THRESHOLD:
+        return format_conversation_history(messages, max_exchanges)
+    
+    # Split messages: older ones to summarize, recent ones to keep verbatim
+    recent_count = RECENT_EXCHANGES_TO_KEEP * 2  # messages, not exchanges
+    older_messages = messages[:-recent_count] if recent_count < len(messages) else []
+    recent_messages = messages[-recent_count:]
+    
+    # Generate summary of older messages
+    summary = ""
+    if older_messages:
+        summary = await summarize_conversation(older_messages)
+    
+    # Format recent messages
+    history_parts = []
+    for msg in recent_messages:
+        if msg.get("role") == "user":
+            history_parts.append(f"User: {msg.get('content', '')}")
+        elif msg.get("role") == "assistant":
+            stage3 = msg.get("stage3", {})
+            response = stage3.get("response", "")
+            if response:
+                if len(response) > 1000:
+                    response = response[:1000] + "..."
+                history_parts.append(f"Council: {response}")
+    
+    # Build final context
+    context_parts = ["[Previous conversation]"]
+    if summary:
+        context_parts.append(f"[Summary of earlier discussion]\n{summary}")
+    if history_parts:
+        context_parts.append("[Recent exchanges]\n" + "\n\n".join(history_parts))
+    context_parts.append("[Current question]")
+    
+    return "\n\n".join(context_parts) + "\n"
+
+
 async def stage1_collect_responses(
     user_query: str,
     conversation_history: Optional[List[Dict[str, Any]]] = None
@@ -63,8 +181,8 @@ async def stage1_collect_responses(
     Returns:
         List of dicts with 'model' and 'response' keys
     """
-    # Format the query with history context if available
-    history_context = format_conversation_history(conversation_history or [])
+    # Format the query with history context (with auto-summarization for long convos)
+    history_context = await format_conversation_history_with_summary(conversation_history or [])
     full_query = history_context + user_query if history_context else user_query
     
     messages = [{"role": "user", "content": full_query}]
