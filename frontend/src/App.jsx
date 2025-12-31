@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatInterface from './components/ChatInterface';
+import Settings, { loadSettings, saveSettings } from './components/Settings';
 import { api } from './api';
 import './App.css';
 
@@ -9,6 +10,8 @@ function App() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [currentConversation, setCurrentConversation] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings, setSettings] = useState(loadSettings());
 
   // Load conversations on mount
   useEffect(() => {
@@ -89,8 +92,17 @@ function App() {
         messages: [...prev.messages, assistantMessage],
       }));
 
-      // Send message with streaming
-      await api.sendMessageStream(currentConversationId, content, (eventType, event) => {
+      // Prepare content with custom instructions if set
+      let fullContent = content;
+      if (settings.customInstructions && settings.customInstructions.trim()) {
+        fullContent = `[User Instructions: ${settings.customInstructions.trim()}]\n\n${content}`;
+      }
+
+      // Send message with streaming (using settings for mode)
+      await api.sendMessageStream(
+        currentConversationId, 
+        fullContent, 
+        (eventType, event) => {
         switch (eventType) {
           case 'stage1_start':
             setCurrentConversation((prev) => {
@@ -169,7 +181,10 @@ function App() {
           default:
             console.log('Unknown event type:', eventType);
         }
-      });
+      },
+      settings.quickMode,
+      settings.lightMode
+    );
     } catch (error) {
       console.error('Failed to send message:', error);
       // Remove optimistic messages on error
@@ -188,11 +203,18 @@ function App() {
         currentConversationId={currentConversationId}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       <ChatInterface
         conversation={currentConversation}
         onSendMessage={handleSendMessage}
         isLoading={isLoading}
+      />
+      <Settings
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        settings={settings}
+        onSave={setSettings}
       />
     </div>
   );
