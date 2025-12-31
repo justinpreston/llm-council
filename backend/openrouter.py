@@ -42,25 +42,23 @@ async def query_model(
 
             data = response.json()
             message = data['choices'][0]['message']
+            
+            # Extract token usage if available
+            usage = data.get('usage', {})
 
             return {
                 'content': message.get('content'),
-                'reasoning_details': message.get('reasoning_details')
+                'reasoning_details': message.get('reasoning_details'),
+                'usage': {
+                    'prompt_tokens': usage.get('prompt_tokens', 0),
+                    'completion_tokens': usage.get('completion_tokens', 0),
+                    'total_tokens': usage.get('total_tokens', 0)
+                },
+                'model': model
             }
 
     except Exception as e:
         print(f"Error querying model {model}: {e}")
-        return None
-
-
-async def query_models_parallel(
-    models: List[str],
-    messages: List[Dict[str, str]]
-) -> Dict[str, Optional[Dict[str, Any]]]:
-    """
-    Query multiple models in parallel.
-
-    Args:
         models: List of OpenRouter model identifiers
         messages: List of message dicts to send to each model
 
