@@ -534,3 +534,111 @@ async def run_full_council(
     }
 
     return stage1_results, stage2_results, stage3_result, metadata
+
+
+async def run_quick_council(
+    user_query: str,
+    conversation_history: Optional[List[Dict[str, Any]]] = None
+) -> Tuple[List, List, Dict, Dict]:
+    """
+    Run a quick 2-stage council process (skips peer ranking).
+    
+    This mode is faster because it skips Stage 2 (peer ranking).
+    The chairman synthesizes directly from Stage 1 responses.
+
+    Args:
+        user_query: The user's question
+        conversation_history: Optional list of previous messages for context
+
+    Returns:
+        Tuple of (stage1_results, empty_stage2, stage3_result, metadata)
+    """
+    # Stage 1: Collect individual responses
+    stage1_results = await stage1_collect_responses(user_query, conversation_history)
+
+    # If no models responded successfully, return error
+    if not stage1_results:
+        return [], [], {
+            "model": "error",
+            "response": "All models failed to respond. Please try again."
+        }, {}
+
+    # Skip Stage 2 - chairman synthesizes directly from Stage 1
+    # Build a modified Stage 3 prompt without ranking context
+    stage3_result = await stage3_synthesize_quick(
+        user_query,
+        stage1_results,
+        conversation_history
+    )
+
+    # Empty metadata since we skipped Stage 2
+    metadata = {
+        "quick_mode": True
+    }
+
+    return stage1_results, [], stage3_result, metadata
+
+
+async def stage3_synthesize_quick(
+    user_query: str,
+    stage1_results: List[Dict[str, Any]],
+    conversation_history: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
+    """
+    Stage 3 Quick Mode: Chairman synthesizes without peer rankings.
+
+    Args:
+        user_query: The original user query
+        stage1_results: Individual model responses from Stage 1
+        conversation_history: Optional list of previous messages for context
+
+    Returns:
+        Dict with 'model' and 'response' keys
+    """
+    # Format history context for chairman
+    history_context = format_conversation_history(conversation_history or [])
+    
+    # Build comprehensive context for chairman
+    stage1_text = "\n\n".join([
+        f"Model: {result['model']}\nResponse: {result['response']}"
+        for result in stage1_results
+    ])
+
+    # Build context-aware chairman prompt (without peer rankings)
+    context_section = ""
+    if history_context:
+        context_section = f"""Previous Conversation Context:
+{history_context}
+
+"""
+    
+    chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question.
+
+{context_section}Original Question: {user_query}
+
+Model Responses:
+{stage1_text}
+
+Your task as Chairman is to synthesize all of these responses into a single, comprehensive, accurate answer to the user's original question. Consider:
+- The individual responses and their unique insights
+- Areas of agreement across models
+- Any contradictions or different perspectives
+
+Provide a clear, well-reasoned final answer that represents the council's collective wisdom:"""
+
+    messages = [{"role": "user", "content": chairman_prompt}]
+
+    # Query the chairman model
+    response = await query_model(CHAIRMAN_MODEL, messages)
+
+    if response is None:
+        # Fallback if chairman fails
+        return {
+            "model": CHAIRMAN_MODEL,
+            "response": "Error: Unable to generate final synthesis."
+        }
+
+    return {
+        "model": CHAIRMAN_MODEL,
+        "response": response.get('content', '')
+    }

@@ -10,7 +10,7 @@ import json
 import asyncio
 
 from . import storage
-from .council import run_full_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, calculate_aggregate_rankings
+from .council import run_full_council, run_quick_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, stage3_synthesize_quick, calculate_aggregate_rankings
 
 app = FastAPI(title="LLM Council API")
 
@@ -32,6 +32,7 @@ class CreateConversationRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
     content: str
+    quick_mode: bool = False  # Skip Stage 2 (peer ranking) for faster responses
 
 
 class ConversationMetadata(BaseModel):
@@ -156,16 +157,27 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             stage1_results = await stage1_collect_responses(request.content, conversation_history)
             yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
-            # Stage 2: Collect rankings
-            yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
-            stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results, conversation_history)
-            aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
-            yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
+            # Quick mode: skip Stage 2 and use simplified Stage 3
+            if request.quick_mode:
+                yield f"data: {json.dumps({'type': 'stage2_skipped', 'quick_mode': True})}\n\n"
+                
+                # Stage 3 Quick: Synthesize without rankings
+                yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
+                stage3_result = await stage3_synthesize_quick(request.content, stage1_results, conversation_history)
+                yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
+                
+                stage2_results = []  # Empty for storage
+            else:
+                # Stage 2: Collect rankings
+                yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
+                stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results, conversation_history)
+                aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
+                yield f"data: {json.dumps({'type': 'stage2_complete', 'data': stage2_results, 'metadata': {'label_to_model': label_to_model, 'aggregate_rankings': aggregate_rankings}})}\n\n"
 
-            # Stage 3: Synthesize final answer
-            yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
-            stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, conversation_history)
-            yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
+                # Stage 3: Synthesize final answer
+                yield f"data: {json.dumps({'type': 'stage3_start'})}\n\n"
+                stage3_result = await stage3_synthesize_final(request.content, stage1_results, stage2_results, conversation_history)
+                yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
 
             # Wait for title generation if it was started
             if title_task:
