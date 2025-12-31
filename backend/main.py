@@ -10,7 +10,7 @@ import json
 import asyncio
 
 from . import storage
-from .council import run_full_council, run_quick_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, stage3_synthesize_quick, calculate_aggregate_rankings
+from .council import run_full_council, run_quick_council, run_light_council, generate_conversation_title, stage1_collect_responses, stage2_collect_rankings, stage3_synthesize_final, stage3_synthesize_quick, calculate_aggregate_rankings
 
 app = FastAPI(title="LLM Council API")
 
@@ -33,6 +33,7 @@ class SendMessageRequest(BaseModel):
     """Request to send a message in a conversation."""
     content: str
     quick_mode: bool = False  # Skip Stage 2 (peer ranking) for faster responses
+    light_mode: bool = False  # Use lighter/cheaper models for simple queries
 
 
 class ConversationMetadata(BaseModel):
@@ -152,13 +153,23 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
             if is_first_message:
                 title_task = asyncio.create_task(generate_conversation_title(request.content))
 
-            # Stage 1: Collect responses
-            yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
-            stage1_results = await stage1_collect_responses(request.content, conversation_history)
-            yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
+            # Light mode: use cheaper/faster models for simple queries
+            if request.light_mode:
+                yield f"data: {json.dumps({'type': 'light_mode_start'})}\n\n"
+                stage1_results, stage2_results, stage3_result, metadata = await run_light_council(
+                    request.content, conversation_history
+                )
+                yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
+                yield f"data: {json.dumps({'type': 'stage2_skipped', 'light_mode': True})}\n\n"
+                yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result, 'metadata': metadata})}\n\n"
+            else:
+                # Stage 1: Collect responses
+                yield f"data: {json.dumps({'type': 'stage1_start'})}\n\n"
+                stage1_results = await stage1_collect_responses(request.content, conversation_history)
+                yield f"data: {json.dumps({'type': 'stage1_complete', 'data': stage1_results})}\n\n"
 
             # Quick mode: skip Stage 2 and use simplified Stage 3
-            if request.quick_mode:
+            if not request.light_mode and request.quick_mode:
                 yield f"data: {json.dumps({'type': 'stage2_skipped', 'quick_mode': True})}\n\n"
                 
                 # Stage 3 Quick: Synthesize without rankings
@@ -167,7 +178,7 @@ async def send_message_stream(conversation_id: str, request: SendMessageRequest)
                 yield f"data: {json.dumps({'type': 'stage3_complete', 'data': stage3_result})}\n\n"
                 
                 stage2_results = []  # Empty for storage
-            else:
+            elif not request.light_mode:
                 # Stage 2: Collect rankings
                 yield f"data: {json.dumps({'type': 'stage2_start'})}\n\n"
                 stage2_results, label_to_model = await stage2_collect_rankings(request.content, stage1_results, conversation_history)

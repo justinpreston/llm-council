@@ -2,7 +2,7 @@
 
 from typing import List, Dict, Any, Tuple, Optional
 from .openrouter import query_models_parallel, query_model
-from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
+from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, COUNCIL_MODELS_LIGHT, CHAIRMAN_MODEL_LIGHT
 
 # Maximum number of previous exchanges to include in context
 MAX_HISTORY_EXCHANGES = 5
@@ -645,6 +645,119 @@ Provide a clear, well-reasoned final answer that represents the council's collec
 
     return {
         "model": CHAIRMAN_MODEL,
+        "response": response.get('content', ''),
+        "usage": response.get('usage', {})
+    }
+
+
+async def run_light_council(
+    user_query: str,
+    conversation_history: Optional[List[Dict[str, Any]]] = None
+) -> Tuple[List, List, Dict, Dict]:
+    """
+    Run a lightweight council with fewer/cheaper models.
+    
+    Uses COUNCIL_MODELS_LIGHT (3 fast models) instead of full council (5 flagship models).
+    Skips Stage 2 (peer ranking) for faster responses.
+    Uses CHAIRMAN_MODEL_LIGHT for synthesis.
+
+    Args:
+        user_query: The user's question
+        conversation_history: Optional list of previous messages for context
+
+    Returns:
+        Tuple of (stage1_results, empty_stage2, stage3_result, metadata)
+    """
+    # Stage 1: Collect responses from light council
+    history_context = await format_conversation_history_with_summary(conversation_history or [])
+    full_query = history_context + user_query if history_context else user_query
+    
+    messages = [{"role": "user", "content": full_query}]
+    responses = await query_models_parallel(COUNCIL_MODELS_LIGHT, messages)
+
+    stage1_results = []
+    for model, response in responses.items():
+        if response is not None:
+            stage1_results.append({
+                "model": model,
+                "response": response.get('content', ''),
+                "usage": response.get('usage', {})
+            })
+
+    if not stage1_results:
+        return [], [], {
+            "model": "error",
+            "response": "All models failed to respond. Please try again.",
+            "usage": {}
+        }, {}
+
+    # Skip Stage 2 - synthesize directly with light chairman
+    stage3_result = await stage3_synthesize_light(
+        user_query,
+        stage1_results,
+        conversation_history
+    )
+
+    metadata = {
+        "light_mode": True,
+        "models_used": COUNCIL_MODELS_LIGHT,
+        "chairman": CHAIRMAN_MODEL_LIGHT
+    }
+
+    return stage1_results, [], stage3_result, metadata
+
+
+async def stage3_synthesize_light(
+    user_query: str,
+    stage1_results: List[Dict[str, Any]],
+    conversation_history: Optional[List[Dict[str, Any]]] = None
+) -> Dict[str, Any]:
+    """
+    Light Mode Stage 3: Fast chairman synthesizes responses.
+
+    Args:
+        user_query: The original user query
+        stage1_results: Individual model responses from Stage 1
+        conversation_history: Optional list of previous messages for context
+
+    Returns:
+        Dict with 'model' and 'response' keys
+    """
+    history_context = format_conversation_history(conversation_history or [])
+    
+    stage1_text = "\n\n".join([
+        f"Model: {result['model']}\nResponse: {result['response']}"
+        for result in stage1_results
+    ])
+
+    context_section = ""
+    if history_context:
+        context_section = f"""Previous Conversation Context:
+{history_context}
+
+"""
+    
+    chairman_prompt = f"""You are synthesizing responses from multiple AI models into a single clear answer.
+
+{context_section}Question: {user_query}
+
+Model Responses:
+{stage1_text}
+
+Provide a concise, accurate answer combining the best insights from all responses:"""
+
+    messages = [{"role": "user", "content": chairman_prompt}]
+    response = await query_model(CHAIRMAN_MODEL_LIGHT, messages)
+
+    if response is None:
+        return {
+            "model": CHAIRMAN_MODEL_LIGHT,
+            "response": "Error: Unable to generate synthesis.",
+            "usage": {}
+        }
+
+    return {
+        "model": CHAIRMAN_MODEL_LIGHT,
         "response": response.get('content', ''),
         "usage": response.get('usage', {})
     }

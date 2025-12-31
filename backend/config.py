@@ -17,8 +17,18 @@ COUNCIL_MODELS = [
     "deepseek/deepseek-v3.2",
 ]
 
+# Light council - faster/cheaper models for simple queries
+COUNCIL_MODELS_LIGHT = [
+    "google/gemini-2.5-flash",
+    "deepseek/deepseek-v3.2",
+    "x-ai/grok-4.1-fast",
+]
+
 # Chairman model - synthesizes final response (Opus 4.5 for best synthesis)
 CHAIRMAN_MODEL = "anthropic/claude-opus-4.5"
+
+# Light chairman - faster model for simple queries
+CHAIRMAN_MODEL_LIGHT = "google/gemini-2.5-flash"
 
 # OpenRouter API endpoint
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"

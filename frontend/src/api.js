@@ -72,9 +72,10 @@ export const api = {
    * @param {string} content - The message content
    * @param {function} onEvent - Callback function for each event: (eventType, data) => void
    * @param {boolean} quickMode - If true, skip Stage 2 for faster responses
+   * @param {boolean} lightMode - If true, use cheaper/faster models
    * @returns {Promise<void>}
    */
-  async sendMessageStream(conversationId, content, onEvent, quickMode = false) {
+  async sendMessageStream(conversationId, content, onEvent, quickMode = false, lightMode = false) {
     const response = await fetch(
       `${API_BASE}/api/conversations/${conversationId}/message/stream`,
       {
@@ -82,7 +83,7 @@ export const api = {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ content, quick_mode: quickMode }),
+        body: JSON.stringify({ content, quick_mode: quickMode, light_mode: lightMode }),
       }
     );
 
