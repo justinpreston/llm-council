@@ -51,6 +51,7 @@ Wrap all `<ReactMarkdown>` in `<div className="markdown-content">` for consisten
 - **Anonymization**: Stage 2 uses labels ("Response A, B, C...") to prevent bias. `label_to_model` mapping exists for de-anonymization.
 - **Metadata Ephemeral**: `label_to_model` and `aggregate_rankings` are returned via API but NOT persisted to storage.
 - **Graceful Degradation**: If some models fail, the system continues with successful responses.
+- **Conversation History**: All 3 stages receive the last 5 exchanges via `format_conversation_history()`. History is captured BEFORE adding the new user message to avoid including it in context.
 
 ## Port Configuration
 | Service  | Port | Config Location |

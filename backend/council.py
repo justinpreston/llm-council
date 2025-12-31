@@ -1,21 +1,73 @@
 """3-stage LLM Council orchestration."""
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL
 
+# Maximum number of previous exchanges to include in context
+MAX_HISTORY_EXCHANGES = 5
 
-async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
+
+def format_conversation_history(messages: List[Dict[str, Any]], max_exchanges: int = MAX_HISTORY_EXCHANGES) -> str:
+    """
+    Format conversation history for inclusion in prompts.
+    
+    Args:
+        messages: List of conversation messages (user and assistant)
+        max_exchanges: Maximum number of exchanges to include
+        
+    Returns:
+        Formatted history string
+    """
+    if not messages:
+        return ""
+    
+    # Get last N exchanges (each exchange = user + assistant)
+    # Take last max_exchanges * 2 messages (pairs)
+    recent_messages = messages[-(max_exchanges * 2):]
+    
+    if not recent_messages:
+        return ""
+    
+    history_parts = []
+    for msg in recent_messages:
+        if msg.get("role") == "user":
+            history_parts.append(f"User: {msg.get('content', '')}")
+        elif msg.get("role") == "assistant":
+            # Extract the final synthesized response from Stage 3
+            stage3 = msg.get("stage3", {})
+            response = stage3.get("response", "")
+            if response:
+                # Truncate long responses to save tokens
+                if len(response) > 1000:
+                    response = response[:1000] + "..."
+                history_parts.append(f"Council: {response}")
+    
+    if not history_parts:
+        return ""
+    
+    return "[Previous conversation]\n" + "\n\n".join(history_parts) + "\n\n[Current question]\n"
+
+
+async def stage1_collect_responses(
+    user_query: str,
+    conversation_history: Optional[List[Dict[str, Any]]] = None
+) -> List[Dict[str, Any]]:
     """
     Stage 1: Collect individual responses from all council models.
 
     Args:
         user_query: The user's question
+        conversation_history: Optional list of previous messages for context
 
     Returns:
         List of dicts with 'model' and 'response' keys
     """
-    messages = [{"role": "user", "content": user_query}]
+    # Format the query with history context if available
+    history_context = format_conversation_history(conversation_history or [])
+    full_query = history_context + user_query if history_context else user_query
+    
+    messages = [{"role": "user", "content": full_query}]
 
     # Query all models in parallel
     responses = await query_models_parallel(COUNCIL_MODELS, messages)
@@ -34,7 +86,8 @@ async def stage1_collect_responses(user_query: str) -> List[Dict[str, Any]]:
 
 async def stage2_collect_rankings(
     user_query: str,
-    stage1_results: List[Dict[str, Any]]
+    stage1_results: List[Dict[str, Any]],
+    conversation_history: Optional[List[Dict[str, Any]]] = None
 ) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
     """
     Stage 2: Each model ranks the anonymized responses.
@@ -42,10 +95,13 @@ async def stage2_collect_rankings(
     Args:
         user_query: The original user query
         stage1_results: Results from Stage 1
+        conversation_history: Optional list of previous messages for context
 
     Returns:
         Tuple of (rankings list, label_to_model mapping)
     """
+    # Format history context for ranking prompt
+    history_context = format_conversation_history(conversation_history or [])
     # Create anonymized labels for responses (Response A, Response B, etc.)
     labels = [chr(65 + i) for i in range(len(stage1_results))]  # A, B, C, ...
 
@@ -61,7 +117,15 @@ async def stage2_collect_rankings(
         for label, result in zip(labels, stage1_results)
     ])
 
-    ranking_prompt = f"""You are evaluating different responses to the following question:
+    # Build context-aware ranking prompt
+    context_section = ""
+    if history_context:
+        context_section = f"""Context from previous conversation:
+{history_context}
+
+"""
+    
+    ranking_prompt = f"""{context_section}You are evaluating different responses to the following question:
 
 Question: {user_query}
 
@@ -115,7 +179,8 @@ Now provide your evaluation and ranking:"""
 async def stage3_synthesize_final(
     user_query: str,
     stage1_results: List[Dict[str, Any]],
-    stage2_results: List[Dict[str, Any]]
+    stage2_results: List[Dict[str, Any]],
+    conversation_history: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Stage 3: Chairman synthesizes final response.
@@ -124,10 +189,13 @@ async def stage3_synthesize_final(
         user_query: The original user query
         stage1_results: Individual model responses from Stage 1
         stage2_results: Rankings from Stage 2
+        conversation_history: Optional list of previous messages for context
 
     Returns:
         Dict with 'model' and 'response' keys
     """
+    # Format history context for chairman
+    history_context = format_conversation_history(conversation_history or [])
     # Build comprehensive context for chairman
     stage1_text = "\n\n".join([
         f"Model: {result['model']}\nResponse: {result['response']}"
@@ -139,9 +207,17 @@ async def stage3_synthesize_final(
         for result in stage2_results
     ])
 
+    # Build context-aware chairman prompt
+    context_section = ""
+    if history_context:
+        context_section = f"""Previous Conversation Context:
+{history_context}
+
+"""
+    
     chairman_prompt = f"""You are the Chairman of an LLM Council. Multiple AI models have provided responses to a user's question, and then ranked each other's responses.
 
-Original Question: {user_query}
+{context_section}Original Question: {user_query}
 
 STAGE 1 - Individual Responses:
 {stage1_text}
@@ -293,18 +369,22 @@ Title:"""
     return title
 
 
-async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
+async def run_full_council(
+    user_query: str,
+    conversation_history: Optional[List[Dict[str, Any]]] = None
+) -> Tuple[List, List, Dict, Dict]:
     """
     Run the complete 3-stage council process.
 
     Args:
         user_query: The user's question
+        conversation_history: Optional list of previous messages for context
 
     Returns:
         Tuple of (stage1_results, stage2_results, stage3_result, metadata)
     """
     # Stage 1: Collect individual responses
-    stage1_results = await stage1_collect_responses(user_query)
+    stage1_results = await stage1_collect_responses(user_query, conversation_history)
 
     # If no models responded successfully, return error
     if not stage1_results:
@@ -314,7 +394,9 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
         }, {}
 
     # Stage 2: Collect rankings
-    stage2_results, label_to_model = await stage2_collect_rankings(user_query, stage1_results)
+    stage2_results, label_to_model = await stage2_collect_rankings(
+        user_query, stage1_results, conversation_history
+    )
 
     # Calculate aggregate rankings
     aggregate_rankings = calculate_aggregate_rankings(stage2_results, label_to_model)
@@ -323,7 +405,8 @@ async def run_full_council(user_query: str) -> Tuple[List, List, Dict, Dict]:
     stage3_result = await stage3_synthesize_final(
         user_query,
         stage1_results,
-        stage2_results
+        stage2_results,
+        conversation_history
     )
 
     # Prepare metadata
