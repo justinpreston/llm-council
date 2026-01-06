@@ -12,6 +12,9 @@ wheels/
 # Keys and secrets
 .env
 
+# VS Code (contains local settings and secrets)
+.vscode/
+
 # Data files
 data/
 

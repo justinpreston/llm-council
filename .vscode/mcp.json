@@ -4,7 +4,7 @@
       "command": "npx",
       "args": ["-y", "@iflow-mcp/openrouter-mcp-multimodal"],
       "env": {
-        "OPENROUTER_API_KEY": "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"
+        "OPENROUTER_API_KEY": "${OPENROUTER_API_KEY}"
       }
     }
   }

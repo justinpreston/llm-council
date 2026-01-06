@@ -1,8 +1,11 @@
 """3-stage LLM Council orchestration."""
 
+import logging
 from typing import List, Dict, Any, Tuple, Optional
 from .openrouter import query_models_parallel, query_model
 from .config import COUNCIL_MODELS, CHAIRMAN_MODEL, COUNCIL_MODELS_LIGHT, CHAIRMAN_MODEL_LIGHT
+
+logger = logging.getLogger(__name__)
 
 # Maximum number of previous exchanges to include in context
 MAX_HISTORY_EXCHANGES = 5
@@ -374,36 +377,56 @@ Provide a clear, well-reasoned final answer that represents the council's collec
 
 def parse_ranking_from_text(ranking_text: str) -> List[str]:
     """
-    Parse the FINAL RANKING section from the model's response.
+    Parse the FINAL RANKING section from the model's response with robustness.
+
+    Handles various formatting variations from different models:
+    - "1. Response A", "1) Response A", "1: Response A"
+    - Missing numbering
+    - Bullet points or other separators
 
     Args:
         ranking_text: The full text response from the model
 
     Returns:
-        List of response labels in ranked order
+        List of response labels in ranked order (empty list if no valid rankings found)
     """
     import re
 
-    # Look for "FINAL RANKING:" section
-    if "FINAL RANKING:" in ranking_text:
+    rankings = []
+    
+    # Look for "FINAL RANKING:" section (case-insensitive)
+    if "FINAL RANKING:" in ranking_text.upper():
         # Extract everything after "FINAL RANKING:"
-        parts = ranking_text.split("FINAL RANKING:")
-        if len(parts) >= 2:
-            ranking_section = parts[1]
-            # Try to extract numbered list format (e.g., "1. Response A")
-            # This pattern looks for: number, period, optional space, "Response X"
-            numbered_matches = re.findall(r'\d+\.\s*Response [A-Z]', ranking_section)
-            if numbered_matches:
-                # Extract just the "Response X" part
-                return [re.search(r'Response [A-Z]', m).group() for m in numbered_matches]
-
-            # Fallback: Extract all "Response X" patterns in order
-            matches = re.findall(r'Response [A-Z]', ranking_section)
-            return matches
-
-    # Fallback: try to find any "Response X" patterns in order
-    matches = re.findall(r'Response [A-Z]', ranking_text)
-    return matches
+        idx = ranking_text.upper().find("FINAL RANKING:")
+        ranking_section = ranking_text[idx + len("FINAL RANKING:"):]
+    else:
+        ranking_section = ranking_text
+    
+    # Pattern to match various formats: "1. Response A", "1) Response A", "1: Response A", "• Response A", etc.
+    # Captures: optional number+separator, then "Response X"
+    pattern = r'(?:\d+[.\):\-]|\•|\*|\-)\s*(Response\s+[A-Z])'
+    matches = re.findall(pattern, ranking_section)
+    
+    if matches:
+        rankings = matches
+    else:
+        # Fallback: just find all "Response X" patterns in order
+        fallback_pattern = r'Response\s+[A-Z]'
+        matches = re.findall(fallback_pattern, ranking_section)
+        rankings = matches
+    
+    # Normalize "Response X" to "Response A" format (remove extra spaces)
+    rankings = [re.sub(r'\s+', ' ', r).strip() for r in rankings]
+    
+    # Validate we got reasonable results (max 26 responses A-Z)
+    if len(rankings) > 26:
+        logger.warning(f"Parsed {len(rankings)} rankings, but max is 26. Truncating.")
+        rankings = rankings[:26]
+    
+    if not rankings:
+        logger.warning(f"Failed to parse any rankings from text:\n{ranking_section[:200]}")
+    
+    return rankings
 
 
 def calculate_aggregate_rankings(

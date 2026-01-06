@@ -2,10 +2,14 @@
 
 import json
 import os
+import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pathlib import Path
+from filelock import FileLock
 from .config import DATA_DIR
+
+logger = logging.getLogger(__name__)
 
 
 def ensure_data_dir():
@@ -18,9 +22,14 @@ def get_conversation_path(conversation_id: str) -> str:
     return os.path.join(DATA_DIR, f"{conversation_id}.json")
 
 
+def get_lock_path(conversation_id: str) -> str:
+    """Get the lock file path for a conversation."""
+    return os.path.join(DATA_DIR, f"{conversation_id}.lock")
+
+
 def create_conversation(conversation_id: str) -> Dict[str, Any]:
     """
-    Create a new conversation.
+    Create a new conversation with atomic file write.
 
     Args:
         conversation_id: Unique identifier for the conversation
@@ -37,17 +46,21 @@ def create_conversation(conversation_id: str) -> Dict[str, Any]:
         "messages": []
     }
 
-    # Save to file
+    # Save to file with lock to prevent race conditions
     path = get_conversation_path(conversation_id)
-    with open(path, 'w') as f:
-        json.dump(conversation, f, indent=2)
+    lock_path = get_lock_path(conversation_id)
+    
+    with FileLock(lock_path, timeout=10):
+        with open(path, 'w') as f:
+            json.dump(conversation, f, indent=2)
+        logger.debug(f"Created conversation {conversation_id}")
 
     return conversation
 
 
 def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
     """
-    Load a conversation from storage.
+    Load a conversation from storage with lock protection.
 
     Args:
         conversation_id: Unique identifier for the conversation
@@ -60,13 +73,18 @@ def get_conversation(conversation_id: str) -> Optional[Dict[str, Any]]:
     if not os.path.exists(path):
         return None
 
-    with open(path, 'r') as f:
-        return json.load(f)
+    # Use lock to prevent reading corrupted data during writes
+    lock_path = get_lock_path(conversation_id)
+    with FileLock(lock_path, timeout=10):
+        with open(path, 'r') as f:
+            data = json.load(f)
+        logger.debug(f"Loaded conversation {conversation_id}")
+        return data
 
 
 def save_conversation(conversation: Dict[str, Any]):
     """
-    Save a conversation to storage.
+    Save a conversation to storage with atomic write and lock protection.
 
     Args:
         conversation: Conversation dict to save
@@ -74,8 +92,14 @@ def save_conversation(conversation: Dict[str, Any]):
     ensure_data_dir()
 
     path = get_conversation_path(conversation['id'])
-    with open(path, 'w') as f:
-        json.dump(conversation, f, indent=2)
+    lock_path = get_lock_path(conversation['id'])
+    
+    # Write with lock to prevent concurrent modifications
+    with FileLock(lock_path, timeout=10):
+        with open(path, 'w') as f:
+            json.dump(conversation, f, indent=2)
+        logger.debug(f"Saved conversation {conversation['id']}")
+
 
 
 def list_conversations() -> List[Dict[str, Any]]:

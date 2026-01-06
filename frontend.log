@@ -1,0 +1,37 @@
+
+> frontend@0.0.0 dev
+> vite
+
+
+  VITE v7.2.4  ready in 98 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+  ➜  press h + enter to show help
+10:13:45 PM [vite] Internal server error: Failed to resolve import "./WorkflowVisualization" from "src/components/ChatInterface.jsx". Does the file exist?
+  Plugin: vite:import-analysis
+  File: /Users/jpp5q/Desktop/AI/llm-council/frontend/src/components/ChatInterface.jsx:6:34
+  6  |  import Stage2 from "./Stage2";
+  7  |  import Stage3 from "./Stage3";
+  8  |  import WorkflowVisualization from "./WorkflowVisualization";
+     |                                     ^
+  9  |  import "./ChatInterface.css";
+  10 |  export default function ChatInterface({
+      at TransformPluginContext._formatLog (file:///Users/jpp5q/Desktop/AI/llm-council/frontend/node_modules/vite/dist/node/chunks/config.js:29647:43)
+      at TransformPluginContext.error (file:///Users/jpp5q/Desktop/AI/llm-council/frontend/node_modules/vite/dist/node/chunks/config.js:29644:14)
+      at normalizeUrl (file:///Users/jpp5q/Desktop/AI/llm-council/frontend/node_modules/vite/dist/node/chunks/config.js:27767:18)
+      at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+      at async file:///Users/jpp5q/Desktop/AI/llm-council/frontend/node_modules/vite/dist/node/chunks/config.js:27825:32
+      at async Promise.all (index 6)
+      at async TransformPluginContext.transform (file:///Users/jpp5q/Desktop/AI/llm-council/frontend/node_modules/vite/dist/node/chunks/config.js:27793:4)
+      at async EnvironmentPluginContainer.transform (file:///Users/jpp5q/Desktop/AI/llm-council/frontend/node_modules/vite/dist/node/chunks/config.js:29445:14)
+      at async loadAndTransform (file:///Users/jpp5q/Desktop/AI/llm-council/frontend/node_modules/vite/dist/node/chunks/config.js:23316:26)
+10:13:45 PM [vite] (client) Pre-transform error: Failed to resolve import "./WorkflowVisualization" from "src/components/ChatInterface.jsx". Does the file exist?
+  Plugin: vite:import-analysis
+  File: /Users/jpp5q/Desktop/AI/llm-council/frontend/src/components/ChatInterface.jsx:6:34
+  6  |  import Stage2 from "./Stage2";
+  7  |  import Stage3 from "./Stage3";
+  8  |  import WorkflowVisualization from "./WorkflowVisualization";
+     |                                     ^
+  9  |  import "./ChatInterface.css";
+  10 |  export default function ChatInterface({
